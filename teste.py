@@ -21,27 +21,40 @@ CONFIG_PASTAS = {
 }
 
 def configurar_git_inicial():
-    """Configura o Git localmente se necessário."""
+    """Configura o Git localmente e garante que o remote está correto."""
     if not os.path.exists(".git"):
         print("\n[GIT] Inicializando repositório...")
         subprocess.run("git init", shell=True)
-        subprocess.run(f"git remote add origin {REPO_REMOTO}", shell=True)
-        subprocess.run('git config user.name "Pecorine125 Bot"', shell=True)
-        subprocess.run('git config user.email "bot@pecorine.com"', shell=True)
-        subprocess.run('git config credential.helper store', shell=True)
+    
+    # Tenta adicionar o remote, se já existir ele apenas atualiza
+    subprocess.run(f"git remote add origin {REPO_REMOTO}", shell=True)
+    subprocess.run(f"git remote set-url origin {REPO_REMOTO}", shell=True)
+    
+    # Configurações de identidade
+    subprocess.run('git config user.name "Pecorine125 Bot"', shell=True)
+    subprocess.run('git config user.email "bot@pecorine.com"', shell=True)
+    subprocess.run('git config credential.helper store', shell=True)
 
 def baixar_arquivo(url, caminho_destino, nome_arquivo):
     """Faz o download e salva temporariamente."""
     if not os.path.exists(caminho_destino):
         os.makedirs(caminho_destino)
 
+    # Limpeza da extensão e nome
     extensao = url.split('.')[-1].split('?')[0]
+    if len(extensao) > 4: extensao = "bin" # Fallback para links sem extensão clara
+    
     nome_limpo = "".join([c for c in nome_arquivo if c.isalnum() or c in (' ', '-', '_')]).strip()
     caminho_completo = os.path.join(caminho_destino, f"{nome_limpo}.{extensao}")
 
     try:
         print(f"   -> Baixando: {nome_limpo}...")
-        resposta = requests.get(url, timeout=25, stream=True)
+        resposta = requests.get(url, timeout=20, stream=True)
+        
+        if resposta.status_code == 404:
+            print(f"   [AVISO] Link quebrado (404): {nome_limpo}")
+            return False
+            
         resposta.raise_for_status()
         with open(caminho_completo, 'wb') as f:
             for chunk in resposta.iter_content(chunk_size=8192):
@@ -54,7 +67,6 @@ def baixar_arquivo(url, caminho_destino, nome_arquivo):
 def processar_planilha():
     configurar_git_inicial()
     
-    # 1. Menu de Escolha
     print("\n" + "="*30)
     print(" SELECIONE O QUE SINCRONIZAR")
     print("="*30)
@@ -75,7 +87,6 @@ def processar_planilha():
     else:
         print("Opção inválida."); return
 
-    # 2. Conexão com Google Sheets
     service = build('sheets', 'v4', developerKey=API_KEY)
     total_baixado = 0
 
@@ -92,30 +103,34 @@ def processar_planilha():
         except Exception as e:
             print(f"Erro na aba {aba}: {e}")
 
-    # 3. GitHub Push e Limpeza
     if total_baixado > 0:
-        print(f"\n[GIT] {total_baixado} arquivos novos. Enviando para o GitHub...")
+        print(f"\n[GIT] {total_baixado} arquivos novos. Preparando envio...")
+        
+        # Identifica a branch atual (master ou main)
+        branch_atual = subprocess.check_output("git rev-parse --abbrev-ref HEAD", shell=True).decode().strip()
+        
         subprocess.run("git add .", shell=True)
-        subprocess.run('git commit -m "Sincronização automática via Script"', shell=True)
-        push = subprocess.run("git push origin main", shell=True)
+        subprocess.run(f'git commit -m "Upload: {total_baixado} arquivos via script"', shell=True)
+        
+        print(f"[GIT] Enviando para branch: {branch_atual}...")
+        push = subprocess.run(f"git push origin {branch_atual}", shell=True)
 
         if push.returncode == 0:
-            print("\n[OK] Upload concluído! Limpando arquivos temporários...")
+            print("\n[OK] Sincronização concluída com sucesso!")
             if os.path.exists("Pecorine125"):
                 shutil.rmtree("Pecorine125")
-                print("Máquina limpa. Tudo salvo no GitHub.")
+                print("Pasta temporária removida. PC limpo.")
         else:
-            print("\n[ERRO] O Push falhou. Verifique sua conexão ou login do GitHub.")
+            print("\n[ERRO] O Push falhou. Verifique se você tem permissão de escrita no repositório.")
     else:
-        print("\nNenhum arquivo novo encontrado para processar.")
+        print("\nNenhum arquivo novo para processar.")
 
 if __name__ == "__main__":
-    # Autenticação Mestre
-    print("--- ACESSO RESTRITO ---")
-    user = input("Usuário: ")
-    passw = input("Senha: ")
+    print("--- LOGIN DE SEGURANÇA ---")
+    u = input("Usuário: ")
+    s = input("Senha: ")
 
-    if user == USUARIO_MESTRE and passw == SENHA_MESTRE:
+    if u == USUARIO_MESTRE and s == SENHA_MESTRE:
         processar_planilha()
     else:
         print("Acesso Negado.")
